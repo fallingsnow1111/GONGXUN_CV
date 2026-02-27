@@ -1,0 +1,17 @@
+# gongxun YOLOv8 数据集配置
+# 路径相对于 data.yaml 所在目录
+path: ../dataset
+train: images/train
+val:   images/val
+
+# 6 个类别，覆盖 mode 1-8 的所有目标
+nc: 6
+names:
+  0: red_block    # mode 1
+  1: green_block  # mode 2, 7
+  2: blue_block   # mode 3
+  3: red_ring     # mode 4
+  4: green_ring   # mode 5
+  5: blue_ring    # mode 6
+  # mode 8 (全色) = 不筛选类别，推理时返回全部结果
+  # mode 9 (白线) = 保留 Hough 变换，不在此训练
