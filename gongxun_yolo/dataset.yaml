@@ -1,0 +1,31 @@
+# 工训赛 YOLOv8 数据集配置
+# ============================
+# 使用方法:
+#   1. 把训练图片放到 dataset/images/train/ 和 dataset/images/val/
+#   2. 把标注文件放到 dataset/labels/train/ 和 dataset/labels/val/
+#   3. 标注格式: YOLO格式 (class_id cx cy w h)，归一化坐标
+#   4. 运行 train.py 开始训练
+
+# 数据集路径（相对于本文件所在目录）
+path: ./dataset
+train: images/train
+val: images/val
+
+# 类别数量
+nc: 6
+
+# 类别名称
+# 训练标注时，class_id 对应关系:
+#   0 → red_block    (红色物块)
+#   1 → green_block  (绿色物块)
+#   2 → blue_block   (蓝色物块)
+#   3 → red_ring     (红色圆环)
+#   4 → green_ring   (绿色圆环)
+#   5 → blue_ring    (蓝色圆环)
+names:
+  0: red_block
+  1: green_block
+  2: blue_block
+  3: red_ring
+  4: green_ring
+  5: blue_ring
