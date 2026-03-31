@@ -57,8 +57,8 @@ MODE_CONFIG = {
 
 # HSV thresholds
 COLOR_THRESHOLDS = {
-    "red": {
         "lower1": np.array([0, 100, 100], np.uint8),
+    "red": {
         "upper1": np.array([10, 255, 255], np.uint8),
         "lower2": np.array([160, 100, 100], np.uint8),
         "upper2": np.array([180, 255, 255], np.uint8),
@@ -162,16 +162,20 @@ class VisionProcessor:
                 self.action_flag = mode
             print(f"Mode changed to {mode}")
 
+    # 获取颜色掩码
     def get_color_mask(self, hsv_img, color):
         cfg = COLOR_THRESHOLDS[color]
+        # 支持双区间（如红色）和单区间（如绿色）的颜色阈值配置
         if "lower1" in cfg:
             bounds = [(cfg["lower1"], cfg["upper1"]), (cfg["lower2"], cfg["upper2"])]
         else:
             bounds = [(cfg["lower"], cfg["upper"])]
 
+        # cv.inRange函数会返回一个二值图像，多个掩码通过位或操作合并成一个最终的掩码
         masks = [cv.inRange(hsv_img, lower, upper) for lower, upper in bounds]
         out = np.zeros(hsv_img.shape[:2], dtype=np.uint8)
         for m in masks:
+            # cv.bitwise_or函数对两个图像进行按位或操作，得到一个新的图像，其中每个像素的值是两个输入图像对应像素值的按位或结果
             out = cv.bitwise_or(out, m)
         return out
 
