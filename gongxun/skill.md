@@ -30,7 +30,7 @@
 
 ## 2. 当前已完成
 - 已完成按平台拆分目录（不改代码内容）：
-  - windows/: color_line_det_windows.py, disk_color_ring_kalman.py, find_camera_id.py
+  - windows/: color_line_det_windows.py, disk_color_ring_kalman.py, find_camera_id.py, test_windows.py, hsv_snapshot_picker.py, threshold_tuner.py
   - raspberry_pi/: color_line_det.py, track.py
 - 新增独立主脚本：windows/disk_color_ring_kalman.py
 - 支持模式（键盘 0-6）：
@@ -78,10 +78,15 @@
 ## 3. 当前运行方式
 - 探测摄像头索引：
   - python gongxun/windows/find_camera_id.py
+- 抓拍+滴管取值（建立 HSV 粗范围）：
+  - python gongxun/windows/hsv_snapshot_picker.py --camera-index 0
 - 启动主识别：
   - python gongxun/windows/disk_color_ring_kalman.py
 - 启动 Windows 兼容旧逻辑版本：
   - python gongxun/windows/color_line_det_windows.py
+- 实时 Trackbar 调阈值（在线微调）：
+  - python gongxun/windows/threshold_tuner.py --camera-index 0
+  - python gongxun/windows/threshold_tuner.py --image gongxun/windows/debug_samples/sample_xxx.jpg
 - 启动 Raspberry Pi 原版脚本：
   - python gongxun/raspberry_pi/color_line_det.py
 - 运行中快捷键：
@@ -172,14 +177,25 @@
 
 ## 6. 本次改动记录（新增）
 - 改动内容：
+  - 新增阈值调试工具脚本：
+    - hsv_snapshot_picker.py（按 s 抓拍静态样本 + 鼠标点击读取 HSV）
+    - threshold_tuner.py（6 通道 HSV Trackbar + 模糊/腐蚀/膨胀联调）
+  - 新增参数导出与证据保存能力：
+    - threshold_tuner.py 支持按 p 打印当前阈值，按 s 保存 frame/mask/json。
   - 按评审建议优化 skill.md 结构：新增状态标签、硬件环境快照、量化验证模板、讲解话术与截图索引。
   - 给坑位补充状态标签（SOLVED / MONITORING），提升后续检索效率。
-  - 本轮未改任何代码文件。
+  - 本轮改动仅新增调试脚本，未改主识别逻辑。
 - 解决方法：
+  - 采用“三步走”流程落地：
+    - 第一步：抓拍固定光照样本，避免动态盲调。
+    - 第二步：鼠标滴管读取多点 HSV，自动给出建议 lower/upper。
+    - 第三步：Trackbar 实时微调并保存可复用阈值配置。
   - 文档层：将“现象 -> 根因 -> 解决”保留不变，仅增强索引能力与可量化表达。
   - 管理层：将仍需持续回归的问题标记为 [MONITORING]，避免与已闭环问题混淆。
 - 验证结果：
-  - 已确认本轮仅日志变更，无代码改动。
+  - hsv_snapshot_picker.py 静态检查通过（No errors found）。
+  - threshold_tuner.py 静态检查通过（No errors found）。
+  - 两个脚本均已支持 Windows 摄像头索引参数与调参结果落盘。
   - 文档内已能快速区分“已解决问题”和“持续观察问题”。
 
 ## 7. 阻塞项/待验证

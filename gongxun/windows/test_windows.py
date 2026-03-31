@@ -63,9 +63,10 @@ COLOR_THRESHOLDS = {
         "lower2": np.array([160, 100, 100], np.uint8),
         "upper2": np.array([180, 255, 255], np.uint8),
     },
+    # 207光照下的绿色阈值
     "green": {
-        "lower": np.array([62, 128, 104], np.uint8),
-        "upper": np.array([90, 255, 255], np.uint8),
+        "lower": np.array([19, 57, 95], np.uint8),
+        "upper": np.array([65, 217, 208], np.uint8),
     },
     "blue": {
         "lower": np.array([82, 79, 189], np.uint8),
@@ -95,8 +96,9 @@ COLOR_THRESHOLDS = {
 
 kernel = np.ones((3, 3), np.uint8)
 
-
+# 打开摄像头并设置参数
 def open_camera():
+    # Windows优先使用CAP_DSHOW，Linux使用CAP_V4L2
     if sys.platform.startswith("win"):
         cap = cv.VideoCapture(CAMERA_INDEX, cv.CAP_DSHOW)
         if not cap.isOpened():
@@ -121,7 +123,7 @@ def open_camera():
         print("Camera opened but first frame invalid")
     return cap
 
-
+# 打开串口
 def open_serial():
     if OUTPUT_MODE != "serial":
         print("Output mode: print (serial disabled)")
@@ -145,7 +147,7 @@ def open_serial():
         print(f"Serial open failed: {exc}. Running in print mode")
         return None
 
-
+# 视觉处理类
 class VisionProcessor:
     def __init__(self, ser_conn):
         self.action_flag = 0
