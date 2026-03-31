@@ -1,3 +1,4 @@
+# 先确认摄像头的index
 import cv2 as cv
 
 def test_cameras():

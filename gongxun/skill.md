@@ -17,7 +17,10 @@
 - 引入卡尔曼滤波降低中心点抖动与短时丢检影响。
 
 ## 2. 当前已完成
-- 新增独立主脚本：disk_color_ring_kalman.py
+- 已完成按平台拆分目录（不改代码内容）：
+  - windows/: color_line_det_windows.py, disk_color_ring_kalman.py, find_camera_id.py
+  - raspberry_pi/: color_line_det.py, track.py
+- 新增独立主脚本：windows/disk_color_ring_kalman.py
 - 支持模式（键盘 0-6）：
   - 1 红色块
   - 2 绿色块
@@ -35,7 +38,7 @@
 - 圆环检测已加入内孔/填充率约束，降低把实心色块误判为圆环。
 - 输出改为打印协议帧（默认 print 模式），格式保持兼容：
   - 55 5A action x y AA
-- 已新增摄像头探测工具：camera_index_probe.py
+- 已新增摄像头探测工具：windows/find_camera_id.py
 - 已确认外接 USB 摄像头索引：2
 - 主脚本已固定摄像头策略：
   - PREFERRED_CAMERA_INDICES = [2]
@@ -62,11 +65,13 @@
 
 ## 3. 当前运行方式
 - 探测摄像头索引：
-  - python gongxun/camera_index_probe.py --max-index 10
+  - python gongxun/windows/find_camera_id.py
 - 启动主识别：
-  - python gongxun/disk_color_ring_kalman.py
+  - python gongxun/windows/disk_color_ring_kalman.py
 - 启动 Windows 兼容旧逻辑版本：
-  - python gongxun/color_line_det_windows.py
+  - python gongxun/windows/color_line_det_windows.py
+- 启动 Raspberry Pi 原版脚本：
+  - python gongxun/raspberry_pi/color_line_det.py
 - 运行中快捷键：
   - 0 关闭识别
   - 1~6 切换对应色块/圆环模式
@@ -136,28 +141,38 @@
   - 现象：模式 4/5/6 看起来像普通色块阈值，不利于讲解和后续调参。
   - 根因：没有独立的色环检测函数和独立分支。
   - 解决：新增 find_ring 与独立模式分支，显式区分色块识别和色环识别。
+- 坑 12：代码防御逻辑过重，调试与讲解成本高。
+  - 现象：相机探测和检测流程分支过多，讲解时主线不清晰。
+  - 根因：早期为兼容复杂现场加入了多层兜底。
+  - 解决：完成瘦身重构：
+    - 摄像头打开改为固定 index+后端（Windows: DSHOW，失败再 CAP_ANY）
+    - get_color_mask 简化为统一边界列表合并
+    - detect_target 统一色块/色环检测逻辑，减少重复代码
+    - 模式分发改为 MODE_CONFIG 表驱动
+- 坑 13：红/绿环识别距离敏感，需靠很近才能稳定识别。
+  - 现象：红环和绿环在中远距离下检出率偏低，绿环更明显。
+  - 根因：疑似 HSV 阈值与环形判定参数（面积/填充率/圆度）在现场光照下偏紧。
+  - 解决：本轮先记录问题与目录整理，不改算法；下一轮优先做阈值重标定与环形参数联调。
+- 坑 14：三色环整体都需要近距离，且绿色环显示与识别最不明显。
+  - 现象：红/绿/蓝三种环在稍远距离都不稳定，绿色环边缘最容易发虚或断裂。
+  - 根因：细环在当前分辨率和光照下像素占比低，叠加阈值与形态学后有效连通区域不足。
+  - 解决：本轮仅记录现象，不改代码；后续优先按“绿环→红环→蓝环”顺序单独重标阈值并调整环形最小面积/圆度参数。
 
 ## 6. 本次改动记录（新增）
-- 改动内容：更新 color_line_det_windows.py，补充 Windows UVC 黑屏修复路径。
+- 改动内容：
+  - 仅更新 skill.md，补充“3 个色环都需近距离，绿环最不明显”的现场现象。
+  - 本轮未改任何代码文件。
 - 解决方法：
-  - Linux：V4L2 + MJPG + /dev/videoX 扫描；默认优先 /dev/video2。
-  - 分辨率帧率固定为 640x480 @ 30 FPS，避免高分辨率与非 MJPG 组合不稳定。
-  - Windows：后端 + FOURCC 组合探测（DSHOW/MSMF/CAP_ANY + MJPG/YUY2/default）。
-  - Windows：默认禁用 0 号回退，避免打开到内置摄像头。
-  - Windows：加入半屏异常检测并打印拒绝原因，避免误选异常组合。
-  - Windows：探测顺序改为 CAP_ANY 优先（匹配当前设备的已验证稳定组合）。
-  - Windows：当前项目配置已切到 HF899 index=0 + 1920x1080，亮度阈值放宽到 2.0。
-  - 识别层：新增色环专用参数（RING_AREA_MIN/MAX、RING_CIRCULARITY_MIN、RING_FILL_RATIO_MAX）。
-  - 串口改为可选，默认 print 输出协议帧。
-  - 线程停止改为 Event 机制，避免 Thread 动态属性问题。
-  - 修复 draw_color 未绑定风险。
+  - 文档层：将新现象归档为独立坑点（坑 14），便于后续逐项验证。
 - 验证结果：
-  - color_line_det_windows.py 静态检查通过（No errors found）。
+  - 已确认本轮仅日志变更，无代码改动。
 
 ## 7. 阻塞项/待验证
-- 当前终端最近一次运行返回 Exit Code 1，需结合完整终端输出继续定位（是否为运行时环境或设备占用问题）。
+- 红/绿环中远距离识别率偏低，需现场光照下重标 HSV 阈值并联调环形判定参数。
+- 蓝环在中距离同样存在检出不稳定，需统一按细环场景做参数重标。
 
 ## 8. 待办（下一阶段）
+- 先做绿色环专项调参（HSV + 环形面积/圆度/形态学），再迁移到红环与蓝环。
 - 现场光照下重新标定 HSV 阈值（尤其是绿色环和蓝色环）。
 - 增加滤波前后抖动统计（标准差）用于量化卡尔曼收益。
 - 增加可选 ROI 配置，缩小搜索区域提升帧率与稳定性。
