@@ -6,6 +6,8 @@ import time
 CAMERA_WIDTH = 1920
 CAMERA_HEIGHT = 1080
 CAMERA_INDEX = 0
+CAMERA_FPS = 30
+CAMERA_WARMUP_SECONDS = 0.5
 
 COLOR_HSV = {
     "red": {
@@ -49,6 +51,9 @@ def open_camera():
         cap = cv.VideoCapture(CAMERA_INDEX, cv.CAP_DSHOW)
         if not cap.isOpened():
             cap = cv.VideoCapture(CAMERA_INDEX, cv.CAP_ANY)
+        if cap.isOpened():
+            # 部分USB摄像头在1080p下只有MJPG编码才能稳定返回图像帧。
+            cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter.fourcc(*"MJPG"))
     else:
         cap = cv.VideoCapture(CAMERA_INDEX, cv.CAP_V4L2)
 
@@ -58,16 +63,22 @@ def open_camera():
     
     cap.set(cv.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
-    cap.set(cv.CAP_PROP_FPS, 30)
+    cap.set(cv.CAP_PROP_FPS, CAMERA_FPS)
 
-    time.sleep(0.5)
+    time.sleep(CAMERA_WARMUP_SECONDS)
 
-    ret, frame = cap.read()
+    ret, frame = False, None
+    for _ in range(10):
+        ret, frame = cap.read()
+        if ret and frame is not None and frame.size > 0:
+            break
+        time.sleep(0.05)
 
-    if ret and frame is not None:
-        print("Camera opened successfully.FPS:", cap.get(cv.CAP_PROP_FPS))
+    if ret and frame is not None and frame.size > 0:
+        print("Camera opened successfully.FPS:", cap.get(cv.CAP_PROP_FPS), "shape:", frame.shape)
     else:
-        print("Error: Could not read from camera.")
+        print("Error: Camera opened but could not read valid frame.")
+        cap.release()
     
     # 返回摄像头对象，供后续使用
     return cap
@@ -120,6 +131,8 @@ def detect_rings(mask, color):
         circle_area = np.pi * radius * radius
         fill_ratio = area / circle_area
 
+        # hierarchy分别表示当前轮廓的下一个轮廓、上一个轮廓、父轮廓和子轮廓的索引，如果没有对应的轮廓则为-1
+        # 不等与-1表示存在对应的子轮廓，说明当前轮廓是一个环形结构，具有内外两个边界
         has_hole = hierarchy is not None and hierarchy[0][i][2] != -1
         if not has_hole and fill_ratio > RING_RULES["fill_ratio_max"]:
             continue
