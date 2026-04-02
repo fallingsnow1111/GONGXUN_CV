@@ -57,8 +57,8 @@ MODE_CONFIG = {
 
 # HSV thresholds
 COLOR_THRESHOLDS = {
-        "lower1": np.array([0, 100, 100], np.uint8),
     "red": {
+        "lower1": np.array([0, 100, 100], np.uint8),
         "upper1": np.array([10, 255, 255], np.uint8),
         "lower2": np.array([160, 100, 100], np.uint8),
         "upper2": np.array([180, 255, 255], np.uint8),
@@ -155,12 +155,79 @@ class VisionProcessor:
         self.lock = threading.Lock()
         self.ser = ser_conn
         self.last_tx = None
+        self.current_fps = 0.0
+        self.last_frame_ts = time.perf_counter()
+        self.metric_window_seconds = 2.0
+        self.metric_window_start = time.perf_counter()
+        self.metric_frame_count = 0
+        self.metric_detect_count = 0
+        self.last_detection_rate = 0.0
 
     def set_mode(self, mode):
         if 0 <= mode <= 9:
             with self.lock:
                 self.action_flag = mode
+            self._reset_detection_metrics()
             print(f"Mode changed to {mode}")
+
+    def _reset_detection_metrics(self):
+        self.metric_window_start = time.perf_counter()
+        self.metric_frame_count = 0
+        self.metric_detect_count = 0
+        self.last_detection_rate = 0.0
+
+    def _update_runtime_metrics(self, detected):
+        now = time.perf_counter()
+        dt = now - self.last_frame_ts
+        if dt > 1e-6:
+            instant_fps = 1.0 / dt
+            if self.current_fps <= 0:
+                self.current_fps = instant_fps
+            else:
+                self.current_fps = 0.85 * self.current_fps + 0.15 * instant_fps
+        self.last_frame_ts = now
+
+        self.metric_frame_count += 1
+        if detected:
+            self.metric_detect_count += 1
+
+        if (now - self.metric_window_start) >= self.metric_window_seconds:
+            self.last_detection_rate = self.metric_detect_count / max(self.metric_frame_count, 1)
+            self.metric_window_start = now
+            self.metric_frame_count = 0
+            self.metric_detect_count = 0
+
+    def _draw_status_overlay(self, frame, current_flag, mode_name, detected, mask_ratio, target):
+        status_color = (0, 220, 0) if detected else (0, 0, 255)
+        status_text = "DETECTED" if detected else "NOT DETECTED"
+
+        overlay = frame.copy()
+        cv.rectangle(overlay, (10, 10), (700, 150), (0, 0, 0), -1)
+        cv.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
+
+        cv.putText(frame, f"Mode {current_flag}: {mode_name}", (20, 38), cv.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2)
+        cv.putText(frame, f"Status: {status_text}", (20, 68), cv.FONT_HERSHEY_SIMPLEX, 0.72, status_color, 2)
+        cv.putText(
+            frame,
+            f"FPS:{self.current_fps:.1f}  DetectRate(2s):{self.last_detection_rate * 100:.1f}%  Mask:{mask_ratio * 100:.1f}%",
+            (20, 98),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 0),
+            2,
+        )
+
+        metric_line = "A:N/A  C:N/A  F:N/A"
+        center_line = "Center:(N/A,N/A)"
+        if target is not None:
+            fill_ratio = target.get("fill_ratio")
+            fill_text = f"{fill_ratio:.3f}" if fill_ratio is not None else "N/A"
+            metric_line = f"A:{target['area']:.0f}  C:{target['circularity']:.3f}  F:{fill_text}"
+            cx, cy = target["center"]
+            center_line = f"Center:({cx},{cy})"
+
+        cv.putText(frame, metric_line, (20, 126), cv.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+        cv.putText(frame, center_line, (430, 126), cv.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
 
     # 获取颜色掩码
     def get_color_mask(self, hsv_img, color):
@@ -227,10 +294,14 @@ class VisionProcessor:
             score = area * circularity
             if score > best_score:
                 best_score = score
+                x, y, w, h = cv.boundingRect(cnt)
                 best = {
                     "contour": cnt,
                     "center": center,
                     "radius": int(radius),
+                    "bbox": (x, y, w, h),
+                    "area": area,
+                    "circularity": circularity,
                     "fill_ratio": fill_ratio,
                 }
 
@@ -280,7 +351,14 @@ class VisionProcessor:
         with self.lock:
             current_flag = self.action_flag
 
+        mode_name = "OFF" if current_flag == 0 else f"Mode {current_flag}"
+        detected = False
+        mask_ratio = 0.0
+        metric_target = None
+        mask_to_show = np.zeros(hsv.shape[:2], dtype=np.uint8)
+
         if current_flag == 9:
+            mode_name = "White Line + Green Ring"
             white_mask = self.get_color_mask(hsv, "white")
             line_data = self.find_lines(white_mask)
             if line_data is not None:
@@ -288,23 +366,31 @@ class VisionProcessor:
                 cv.line(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                 cv.putText(frame, "White Line", (x1, y1 - 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
                 self.send_serial("line", slope * 1000)
+                detected = True
 
             ring_mask = self.get_color_mask(hsv, "green_circle")
             ring_mask = self.process_mask(ring_mask, "ring")
             ring = self.detect_target(ring_mask, "ring")
-            cv.imshow("mask", ring_mask)
+            mask_to_show = ring_mask
+            mask_ratio = float(np.count_nonzero(ring_mask)) / ring_mask.size
             if ring is not None:
                 cx, cy = ring["center"]
                 cv.drawContours(frame, [ring["contour"]], -1, (0, 255, 0), 2)
                 cv.circle(frame, (cx, cy), ring["radius"], (255, 0, 0), 2)
                 cv.circle(frame, (cx, cy), 3, (0, 255, 255), -1)
+                x, y, w, h = ring["bbox"]
+                cv.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 self.send_serial("circle", cx / SCALE_X, cy / SCALE_Y)
+                detected = True
+                metric_target = ring
 
         elif current_flag in MODE_CONFIG:
             mode = MODE_CONFIG[current_flag]
+            mode_name = mode["name"]
             mask = self.get_color_mask(hsv, mode["color"])
             mask = self.process_mask(mask, mode["target"])
-            cv.imshow("mask", mask)
+            mask_to_show = mask
+            mask_ratio = float(np.count_nonzero(mask)) / mask.size
 
             target = self.detect_target(mask, mode["target"])
             if target is not None:
@@ -313,6 +399,8 @@ class VisionProcessor:
                 cv.circle(frame, (cx, cy), 5, (0, 255, 255), -1)
                 if mode["target"] == "ring":
                     cv.circle(frame, (cx, cy), target["radius"], mode["draw"], 2)
+                    x, y, w, h = target["bbox"]
+                    cv.rectangle(frame, (x, y), (x + w, y + h), mode["draw"], 2)
                 cv.putText(
                     frame,
                     mode["name"],
@@ -323,6 +411,12 @@ class VisionProcessor:
                     2,
                 )
                 self.send_serial("circle", cx / SCALE_X, cy / SCALE_Y)
+                detected = True
+                metric_target = target
+
+        cv.imshow("mask", mask_to_show)
+        self._update_runtime_metrics(detected)
+        self._draw_status_overlay(frame, current_flag, mode_name, detected, mask_ratio, metric_target)
 
         return frame
 

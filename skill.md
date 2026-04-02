@@ -246,3 +246,18 @@
 - 验证结果：
   - skill.md 已完成架构评审采纳记录，可直接作为后续代码改进执行清单。
   - 当前版本满足“先记录方案、等待后续代码改进”的要求。
+
+## 16. 本次改动记录（2026-04-02，可视化量化指标与环形方框）
+- 改动内容：
+  - 更新 [windows/test_windows.py](windows/test_windows.py)：新增实时可视化量化指标叠层，包含 `FPS`、`DetectRate(2s)`、`Mask占比`、`面积(area)`、`圆度(circularity)`、`填充率(fill_ratio)` 与中心坐标。
+  - 新增明显识别状态提示：`DETECTED / NOT DETECTED`，用于快速判断“当前是否识别到目标”。
+  - 在色环识别分支（模式 4/5/6 与模式 9 的绿环）新增矩形方框标注（`cv.rectangle`），与轮廓/外接圆同时显示。
+  - 修正 `COLOR_THRESHOLDS` 中红色阈值结构，确保双区间配置在 `red` 节点下生效。
+- 踩到的坑：
+  - 初次补丁时在 `process_frame` 末尾引入了缩进错误，导致静态检查报“意外缩进”。
+- 解决方法：
+  - 重新整理 `process_frame` 末尾结构，将 `detected/metric_target` 对齐到目标检测分支层级。
+  - 将 `cv.imshow("mask", ...)`、运行指标更新与 HUD 绘制统一放到分支外，确保 0/1-9 全模式都能显示状态与指标。
+- 验证结果：
+  - [windows/test_windows.py](windows/test_windows.py) 静态检查通过（No errors found）。
+  - 当前未接入现场实机回归，本次验证结论为“代码层通过，实机效果待你现场确认”。
