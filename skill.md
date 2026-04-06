@@ -1,6 +1,6 @@
 # gongxun Vision 开发进度记录
 
-更新时间：2026-04-02
+更新时间：2026-04-06
 
 ## 状态标签说明
 - [SOLVED]：已定位并完成修复，当前版本稳定复现通过。
@@ -23,6 +23,7 @@
   - 解决方法
   - 验证结果（是否通过）
 - 若存在未解决问题，必须追加到“阻塞项/待验证”中。
+- 新增记录筛选规则：仅代码整理、路径修改、文档格式调整这类与“方案优化/bug 修复”无关的改动，不写入本文件。
 
 ## 1. 目标
 - 圆盘机场景下实现红/绿/蓝色块识别与圆环识别。
@@ -78,18 +79,18 @@
 
 ## 3. 当前运行方式
 - 探测摄像头索引：
-  - python gongxun/windows/find_camera_id.py
+  - python windows/find_camera_id.py
 - 抓拍+滴管取值（建立 HSV 粗范围）：
-  - python gongxun/windows/hsv_snapshot_picker.py --camera-index 0
+  - python windows/hsv_snapshot_picker.py --camera-index 0
 - 启动主识别：
-  - python gongxun/windows/disk_color_ring_kalman.py
+  - python windows/disk_color_ring_kalman.py
 - 启动 Windows 兼容旧逻辑版本：
-  - python gongxun/windows/color_line_det_windows.py
+  - python windows/color_line_det_windows.py
 - 实时 Trackbar 调阈值（在线微调）：
-  - python gongxun/windows/threshold_tuner.py --camera-index 0
-  - python gongxun/windows/threshold_tuner.py --image gongxun/windows/debug_samples/sample_xxx.jpg
+  - python windows/threshold_tuner.py --camera-index 0
+  - python windows/threshold_tuner.py --image windows/debug_samples/sample_xxx.jpg
 - 启动 Raspberry Pi 原版脚本：
-  - python gongxun/raspberry_pi/color_line_det.py
+  - python raspberry_pi/color_line_det.py
 - 运行中快捷键：
   - 0 关闭识别
   - 1~6 切换对应色块/圆环模式
@@ -232,22 +233,7 @@
   - 文档已完成主线收敛：从“设备问题复盘”转为“比赛落地方案+性能目标”。
   - 当前记录已满足“本次改动/踩坑/解决方法/验证结果”四要素。
 
-## 15. 本次改动记录（2026-04-02，架构评审采纳）
-- 改动内容：
-  - 新增架构评审结论：主循环（CV + Kalman）+ YOLO 低频线程、非阻塞共享结果、OpenVINO 优先方向均判定为合理。
-  - 明确当前关键缺口：双链路缺少融合机制（时间对齐、目标关联、置信度融合）。
-  - 将后续工作重排为 P0/P1/P2，且将“边缘驱动圆检测、Kalman 完整状态、ROI 动态机制”列为 P0。
-  - 量化指标升级为 detection_rate、false_positive_rate、jitter_std、latency_ms、cpu_usage。
-- 踩到的坑：
-  - 先前问题分析偏向 HSV 阈值与形态学调参，容易把“几何建模不足”误判为“参数没调好”。
-- 解决方法：
-  - 记录并采纳评审建议：圆环检测从颜色域主导转向几何域主导，并把数据闭环与自动评估纳入 P1。
-  - 保持“先文档定策略、后代码分阶段落地”的节奏，本次仅更新文档，不改主识别代码。
-- 验证结果：
-  - skill.md 已完成架构评审采纳记录，可直接作为后续代码改进执行清单。
-  - 当前版本满足“先记录方案、等待后续代码改进”的要求。
-
-## 16. 本次改动记录（2026-04-02，可视化量化指标与环形方框）
+## 15. 本次改动记录（2026-04-02，可视化量化指标与环形方框）
 - 改动内容：
   - 更新 [windows/test_windows.py](windows/test_windows.py)：新增实时可视化量化指标叠层，包含 `FPS`、`DetectRate(2s)`、`Mask占比`、`面积(area)`、`圆度(circularity)`、`填充率(fill_ratio)` 与中心坐标。
   - 新增明显识别状态提示：`DETECTED / NOT DETECTED`，用于快速判断“当前是否识别到目标”。
@@ -261,3 +247,24 @@
 - 验证结果：
   - [windows/test_windows.py](windows/test_windows.py) 静态检查通过（No errors found）。
   - 当前未接入现场实机回归，本次验证结论为“代码层通过，实机效果待你现场确认”。
+
+## 16. 本次改动记录（2026-04-06，摄像头打开失败排查）
+- 改动内容：
+  - 参考 [windows/test_windows.py](windows/test_windows.py) 的相机初始化策略，升级 [windows/hsv_snapshot_picker.py](windows/hsv_snapshot_picker.py) 与 [windows/threshold_tuner.py](windows/threshold_tuner.py) 的 `open_camera`：
+    - Windows 端优先 `CAP_DSHOW`，失败回退 `CAP_ANY`。
+    - 设置 `MJPG` FourCC（仅 Windows）。
+    - 设置分辨率/FPS 后增加预热（0.5s）与首帧有效性校验（最多重试 10 次）。
+  - 新增索引回退机制：若指定索引失败，自动尝试 0~5 其余索引，成功后打印实际使用索引。
+  - 新增更明确的失败提示：打开失败时提示先运行 [windows/find_camera_id.py](windows/find_camera_id.py)。
+- 踩到的坑：
+  - 原脚本仅做“单索引 + 简单打开”判断，现场当索引变化或首帧无效时会直接报“Camera open failed”。
+  - 无日志输出实际后端、实际分辨率与实际 FPS，定位成本高。
+- 解决方法：
+  - 对齐主测试脚本的稳定策略（后端回退 + MJPG + 预热 + 首帧校验）。
+  - 增加索引自动回退与打开成功日志（index/backend/size/fps/frame_shape）。
+  - 在失败路径补充明确排障入口（`find_camera_id.py`）。
+- 验证结果：
+  - [windows/hsv_snapshot_picker.py](windows/hsv_snapshot_picker.py) 静态检查通过（No errors found）。
+  - [windows/threshold_tuner.py](windows/threshold_tuner.py) 静态检查通过（No errors found）。
+  - 尚未完成实机回归；需在现场执行并确认最终选中的 camera index 与画面稳定性。
+

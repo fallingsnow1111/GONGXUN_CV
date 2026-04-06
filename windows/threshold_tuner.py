@@ -2,6 +2,8 @@
 import argparse
 import datetime
 import json
+import sys
+import time
 from pathlib import Path
 
 import cv2 as cv
@@ -11,6 +13,7 @@ import numpy as np
 WINDOW_TUNER = "Tuner"
 WINDOW_MASK = "Mask_Effect"
 WINDOW_PREVIEW = "Preview"
+CAMERA_WARMUP_SECONDS = 0.5
 
 
 def nothing(_):
@@ -41,17 +44,57 @@ def build_parser():
     return parser
 
 
-def open_camera(index, width, height, fps):
-    cap = cv.VideoCapture(index, cv.CAP_DSHOW)
-    if not cap.isOpened():
-        cap = cv.VideoCapture(index, cv.CAP_ANY)
-    if not cap.isOpened():
-        return cap
+def _open_single_camera(index, width, height, fps):
+    backend = "CAP_V4L2"
+    if sys.platform.startswith("win"):
+        cap = cv.VideoCapture(index, cv.CAP_DSHOW)
+        backend = "CAP_DSHOW"
+        if not cap.isOpened():
+            cap = cv.VideoCapture(index, cv.CAP_ANY)
+            backend = "CAP_ANY"
+        if not cap.isOpened():
+            return None
+        cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter.fourcc(*"MJPG"))
+    else:
+        cap = cv.VideoCapture(index, cv.CAP_V4L2)
+        if not cap.isOpened():
+            return None
 
     cap.set(cv.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv.CAP_PROP_FPS, fps)
+    time.sleep(CAMERA_WARMUP_SECONDS)
+
+    ok, frame = False, None
+    for _ in range(10):
+        ok, frame = cap.read()
+        if ok and frame is not None and frame.size > 0:
+            break
+        time.sleep(0.05)
+
+    if not ok or frame is None or frame.size == 0:
+        cap.release()
+        return None
+
+    real_w = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
+    real_h = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
+    real_fps = cap.get(cv.CAP_PROP_FPS)
+    print(
+        f"Camera opened: index={index}, backend={backend}, "
+        f"size={real_w}x{real_h}, fps={real_fps:.1f}, frame_shape={frame.shape}"
+    )
     return cap
+
+
+def open_camera(index, width, height, fps):
+    candidates = [index] + [i for i in range(6) if i != index]
+    for idx in candidates:
+        cap = _open_single_camera(idx, width, height, fps)
+        if cap is not None and cap.isOpened():
+            if idx != index:
+                print(f"Camera index {index} failed, fallback to index {idx}")
+            return cap, idx
+    return cv.VideoCapture(), index
 
 
 def create_trackbars(args):
@@ -156,11 +199,11 @@ def main():
 
     cap = None
     if static_image is None:
-        cap = open_camera(args.camera_index, args.width, args.height, args.fps)
+        cap, used_index = open_camera(args.camera_index, args.width, args.height, args.fps)
         if not cap.isOpened():
-            print("Camera open failed")
+            print("Camera open failed. Try: python windows/find_camera_id.py")
             return
-        print(f"Tuning with live camera index={args.camera_index}")
+        print(f"Tuning with live camera index={used_index}")
 
     save_dir = Path(args.save_dir)
 
