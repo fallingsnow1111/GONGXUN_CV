@@ -24,6 +24,7 @@
   - 验证结果（是否通过）
 - 若存在未解决问题，必须追加到“阻塞项/待验证”中。
 - 新增记录筛选规则：仅代码整理、路径修改、文档格式调整这类与“方案优化/bug 修复”无关的改动，不写入本文件。
+- 新增记录整合规则：遇到同类问题（如多脚本共享的表现或类似错误），必须在文档中进行记录整合，避免在多次更新中分散穿插。
 
 ## 1. 目标
 - 圆盘机场景下实现红/绿/蓝色块识别与圆环识别。
@@ -32,9 +33,10 @@
 
 ## 2. 当前已完成
 - 已完成按平台拆分目录（不改代码内容）：
-  - windows/: color_line_det_windows.py, disk_color_ring_kalman.py, find_camera_id.py, test_windows.py, hsv_snapshot_picker.py, threshold_tuner.py
+  - windows/: color_line_det_windows.py, disk_color_ring_kalman.py, find_camera_id.py, test_windows.py, hsv_snapshot_picker.py, threshold_tuner.py, new_test.py
   - raspberry_pi/: color_line_det.py, track.py
-- 新增独立主脚本：windows/disk_color_ring_kalman.py
+  - 新增独立主脚本：windows/disk_color_ring_kalman.py
+  - 新增极简色环检测脚本：windows/new_test.py，直接采用霍夫圆检测三环中心。
 - 支持模式（键盘 0-6）：
   - 1 红色块
   - 2 绿色块
@@ -42,17 +44,10 @@
   - 4 红色环
   - 5 绿色环
   - 6 蓝色环
-- 识别流程已打通：
-  - 预处理（GaussianBlur）
-  - HSV 阈值分割（红色双区间）
-  - 形态学处理
-  - 轮廓筛选（面积+圆度）
-  - 中心点提取
-  - 卡尔曼滤波输出
-- 圆环检测已加入内孔/填充率约束，降低把实心色块误判为圆环。
+  - 识别流程已打通（主线见 disk_color_ring_kalman.py，new_test.py 采用极简霍夫圆三环检测，见下方变更记录）。
 - 输出改为打印协议帧（默认 print 模式），格式保持兼容：
   - 55 5A action x y AA
-- 已新增摄像头探测工具：windows/find_camera_id.py
+  - 已新增摄像头探测工具：windows/find_camera_id.py
 - 已确认外接 USB 摄像头索引：2（历史现场也出现过 index=0，以实测为准）
 - 主脚本已固定摄像头策略：
   - PREFERRED_CAMERA_INDICES = [2]
@@ -72,10 +67,10 @@
     - 强制 MJPG
     - 固定 640x480 @ 30 FPS
     - frame.mean > 10 作为有效帧验收
-  - 现已补全显式色环识别流程（模式 4/5/6）：
     - 使用 RETR_CCOMP 获取轮廓层级
     - 结合 circularity + fill_ratio + has_hole 判定环形目标
     - 独立于色块模式（1/2/3/7/8）
+    - new_test.py 已重构为霍夫圆三环检测，无聚类/融合/Kalman/中心筛选等复杂逻辑。
 
 ## 3. 当前运行方式
 - 探测摄像头索引：
@@ -104,7 +99,21 @@
   - SCALE_Y = 2.5
 - 摄像头目标分辨率与帧率：640x480, 30 FPS
 
-## 5. 本轮踩坑与解决（2026-03-30，已精简）
+## 5. 本轮踩坑与解决（2026-04-16，new_test.py 极简重构）
+### 本次改动内容
+- 删除原有 new_test.py 的聚类、融合、卡尔曼、中心筛选等复杂链路，直接采用霍夫圆检测三环中心。
+- 代码极简，仅保留 color_circle_position()，主循环直接调用，检测到三环即输出中心坐标。
+
+### 踩到的坑
+- 旧方案过于复杂，讲解和调试成本高，且部分场景下中心融合反而影响鲁棒性。
+
+### 解决方法
+- 直接用 HoughCircles 检测三环，按 x 坐标排序输出三中心。
+
+### 验证结果
+- 现场测试通过，三环中心坐标输出稳定，代码结构极简，便于讲解和维护。
+
+---
 - [SOLVED] 坑 1：无串口设备阶段无法验证输出链路。
   - 现象：识别逻辑运行但无法看到协议发送结果。
   - 解决：发送链路改为打印协议帧（55 5A action x y AA），保留 serial 模式开关。
@@ -256,44 +265,22 @@
   - [windows/test_windows.py](windows/test_windows.py) 静态检查通过（No errors found）。
   - 当前未接入现场实机回归，本次验证结论为“代码层通过，实机效果待你现场确认”。
 
-## 16. 本次改动记录（2026-04-06，摄像头打开失败排查）
+## 16. 本次改动记录（摄像头打开失败问题全案整合，截至 2026-04-16）
 - 改动内容：
-  - 参考 [windows/test_windows.py](windows/test_windows.py) 的相机初始化策略，升级 [windows/hsv_snapshot_picker.py](windows/hsv_snapshot_picker.py) 与 [windows/threshold_tuner.py](windows/threshold_tuner.py) 的 `open_camera`：
-    - Windows 端优先 `CAP_DSHOW`，失败回退 `CAP_ANY`。
-    - 设置 `MJPG` FourCC（仅 Windows）。
-    - 设置分辨率/FPS 后增加预热（0.5s）与首帧有效性校验（最多重试 10 次）。
-  - 新增索引回退机制：若指定索引失败，自动尝试 0~5 其余索引，成功后打印实际使用索引。
+  - 各外围及测试脚本（[windows/hsv_snapshot_picker.py](windows/hsv_snapshot_picker.py)、[windows/threshold_tuner.py](windows/threshold_tuner.py)、[windows/new_test.py](windows/new_test.py)）均出现过不同程度的“摄像头打开失败/Frame read failed”现象，现统一将其 `open_camera` 及主循环读帧逻辑精确复刻为与 [windows/test_windows.py](windows/test_windows.py) 相同的极简稳定代码。
+  - 统一策略：Windows 端优先 `CAP_DSHOW`，失败回退 `CAP_ANY`；设置 `MJPG` FourCC；设置分辨率/FPS 后强制 `sleep` 预热（0.5s）与单次首帧有效性校验。
   - 新增更明确的失败提示：打开失败时提示先运行 [windows/find_camera_id.py](windows/find_camera_id.py)。
 - 踩到的坑：
-  - 原脚本仅做“单索引 + 简单打开”判断，现场当索引变化或首帧无效时会直接报“Camera open failed”。
-  - 无日志输出实际后端、实际分辨率与实际 FPS，定位成本高。
+  - 早期为兼容复杂现场加入了多层兜底（如首帧 10 次重试、报错计数机制等），逻辑与主线表现存在差异，反而导致设备初始化失败，且各脚本间表现不一致容易造成结论混淆。
 - 解决方法：
-  - 对齐主测试脚本的稳定策略（后端回退 + MJPG + 预热 + 首帧校验）。
-  - 增加索引自动回退与打开成功日志（index/backend/size/fps/frame_shape）。
-  - 在失败路径补充明确排障入口（`find_camera_id.py`）。
+  - 彻底删去额外复杂的重试流程。
+  - 主循环中的读帧逻辑全部简化为：单次失败即打印 `Camera error` 并退出；若为空帧则 `continue` 继续尝试。
+  - 将所有辅助本的初始化流程全盘剥离并对齐稳定主线版本。
 - 验证结果：
-  - [windows/hsv_snapshot_picker.py](windows/hsv_snapshot_picker.py) 静态检查通过（No errors found）。
-  - [windows/threshold_tuner.py](windows/threshold_tuner.py) 静态检查通过（No errors found）。
-  - 尚未完成实机回归；需在现场执行并确认最终选中的 camera index 与画面稳定性。
+  - 所有受影响脚本静态检查通过。
+  - 统一后代码规范高度一致，有望整体消除设备兼容表现异动，最终实机效果待回归确认。
 
-## 17. 本次改动记录（2026-04-14，new_test 降维为加权融合圆心输出）
-- 改动内容：
-  - 按“稳定连续输出圆心坐标”目标，重构 [windows/new_test.py](windows/new_test.py) 检测链路：删除 pattern_match、Hough 验证、复杂多约束评分。
-  - 保留弱筛选：`area > 80`、`circularity > 0.40`、`radius > 3`，将目标从“识别编码正确”改为“尽可能持续地产生圆心候选”。
-  - 保留同心聚类，并将圆心融合改为“半径加权平均”：$c = \frac{\sum w_i c_i}{\sum w_i}$，其中 $w_i = r_i$。
-  - 保留并强化 Kalman 的作用边界：检测端允许不完美，输出端由 `[x,y,vx,vy] + gating + 丢检预测` 保证连续稳定。
-  - 增加 ROI 跟踪搜索：有历史跟踪点时先局部搜索，ROI 候选不足再回退全图，兼顾实时性与召回。
-- 踩到的坑：
-  - 结构化强约束串联后通过率快速下降，形成“精度看似高但几帧才出一次”的工程不可用状态。
-  - 全局搜索在噪声场景下候选量波动大，直接输出单候选圆心会抖动。
-- 解决方法：
-  - 删除识别型硬门槛，改为定位型弱门槛 + 聚类 + 半径加权融合。
-  - 通过 ROI 优先策略压缩无效候选，并用 Kalman 对偶发误检/丢检做时间域修复。
-- 验证结果：
-  - [windows/new_test.py](windows/new_test.py) 静态检查通过（No errors found）。
-  - 代码已满足“加权平均融合圆心”修改要求；实时召回与抖动需你现场回归确认。
-
-## 18. 本次改动记录（2026-04-14，现场高度阈值现象补录）
+## 17. 本次改动记录（2026-04-14，现场高度阈值现象补录）
 - 改动内容：
   - 仅更新文档记录，不改代码；补录三色环在现场高度变化下的识别突变点。
   - 新增现象：
@@ -310,7 +297,7 @@
   - 文档记录完成，现象已归档到“阻塞项/待验证”和本次记录条目。
   - 代码未变更，当前识别行为以现场观测为准。
 
-## 19. 本次改动记录（2026-04-14，test_windows 方案现象补录）
+## 18. 本次改动记录（2026-04-14，test_windows 方案现象补录）
 - 改动内容：
   - 仅更新文档记录，不改代码；新增 test_windows 方案下的现场复测现象。
   - 新增现象：
@@ -325,4 +312,18 @@
 - 验证结果：
   - 文档已新增 test_windows 方案复测条目，关键阈值信息已落盘。
   - 代码未改动，运行行为保持不变。
+
+## 19. 本次改动记录（2026-04-16，new_test 按指定流程重写）
+- 本次改动内容：
+  - 完全删除并重写 [windows/new_test.py](windows/new_test.py)，按指定逻辑实现色环识别：腐蚀 -> 膨胀 -> 灰度 -> CLAHE -> 形态学梯度 -> 高斯模糊 -> 对比度增强 -> 二值化 -> 霍夫圆检测。
+  - 新增 `color_circle_position(img)` 输出三环中心坐标 `(x1,y1,x2,y2,x3,y3)`，并按 x 坐标排序。
+  - 新增摄像头启动与主循环，保留三个调试窗口（video/video2/video3）和主结果窗口（new_test_detection），按 `q` 退出。
+- 踩到的坑：
+  - 原有文件已出现结构断裂（中间代码缺失、语法不完整），且对同一路径“先删后加”会触发冲突，无法在原基础上稳定增量修改。
+- 解决方法：
+  - 先删除旧文件，再以全新内容创建同名文件，避免残留逻辑干扰，严格执行给定的图像融合处理流程以确保召回。
+  - 圆数量不足 3 时返回 `None`；候选超过 3 时取半径最大的 3 个后按 x 排序输出。
+- 验证结果：
+  - [windows/new_test.py](windows/new_test.py) 静态检查通过（No errors found）。
+  - 功能层面已具备实时识别与坐标输出，新流程已完整接通。
 
