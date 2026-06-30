@@ -1,0 +1,8 @@
+id: gongxun_cv
+name: Gongxun CV
+version: 1.0.0
+author: LuoXue
+icon: ''
+desc: vision module
+files:
+  - 88.py
